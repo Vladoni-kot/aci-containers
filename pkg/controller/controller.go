@@ -37,6 +37,7 @@ import (
 	"github.com/noironetworks/aci-containers/pkg/index"
 	"github.com/noironetworks/aci-containers/pkg/ipam"
 	"github.com/noironetworks/aci-containers/pkg/metadata"
+	nodeinfo "github.com/noironetworks/aci-containers/pkg/nodeinfo/apis/aci.snat/v1"
 	"github.com/noironetworks/aci-containers/pkg/util"
 )
 
@@ -53,10 +54,11 @@ type AciController struct {
 	defaultEg string
 	defaultSg string
 
-	podQueue     workqueue.RateLimitingInterface
-	netPolQueue  workqueue.RateLimitingInterface
-	serviceQueue workqueue.RateLimitingInterface
-	snatQueue    workqueue.RateLimitingInterface
+	podQueue          workqueue.RateLimitingInterface
+	netPolQueue       workqueue.RateLimitingInterface
+	serviceQueue      workqueue.RateLimitingInterface
+	snatQueue         workqueue.RateLimitingInterface
+	snatNodeInfoQueue workqueue.RateLimitingInterface
 
 	namespaceIndexer      cache.Indexer
 	namespaceInformer     cache.Controller
@@ -76,6 +78,8 @@ type AciController struct {
 	networkPolicyInformer cache.Controller
 	snatIndexer           cache.Indexer
 	snatInformer          cache.Controller
+	snatNodeInfoIndexer   cache.Indexer
+	snatNodeInformer      cache.Controller
 
 	updatePod              podUpdateFunc
 	updateNode             nodeUpdateFunc
@@ -113,10 +117,12 @@ type AciController struct {
 	serviceMetaCache     map[string]*serviceMeta
 	snatPolicyCache      map[string]*ContSnatPolicy
 	snatServices         map[string]bool
-
-	nodeSyncEnabled    bool
-	serviceSyncEnabled bool
-	snatSyncEnabled    bool
+	snatNodeInfoCache    map[string]*nodeinfo.NodeInfo
+	// Node Name and Policy Name
+	snatGlobalInfoCache map[string]map[string]*ContSnatGlobalInfo
+	nodeSyncEnabled     bool
+	serviceSyncEnabled  bool
+	snatSyncEnabled     bool
 }
 
 type nodeServiceMeta struct {
@@ -186,10 +192,11 @@ func NewController(config *ControllerConfig, env Environment, log *logrus.Logger
 		defaultEg: "",
 		defaultSg: "",
 
-		podQueue:     createQueue("pod"),
-		netPolQueue:  createQueue("networkPolicy"),
-		serviceQueue: createQueue("service"),
-		snatQueue:    createQueue("snat"),
+		podQueue:          createQueue("pod"),
+		netPolQueue:       createQueue("networkPolicy"),
+		serviceQueue:      createQueue("service"),
+		snatQueue:         createQueue("snat"),
+		snatNodeInfoQueue: createQueue("snatnodeinfo"),
 
 		configuredPodNetworkIps: newNetIps(),
 		podNetworkIps:           newNetIps(),
@@ -204,6 +211,8 @@ func NewController(config *ControllerConfig, env Environment, log *logrus.Logger
 		serviceMetaCache:     make(map[string]*serviceMeta),
 		snatPolicyCache:      make(map[string]*ContSnatPolicy),
 		snatServices:         make(map[string]bool),
+		snatNodeInfoCache:    make(map[string]*nodeinfo.NodeInfo),
+		snatGlobalInfoCache:  make(map[string]map[string]*ContSnatGlobalInfo),
 	}
 }
 
@@ -401,6 +410,7 @@ func (cont *AciController) Run(stopCh <-chan struct{}) {
 		if ok {
 			qs = []workqueue.RateLimitingInterface{
 				cont.podQueue, cont.netPolQueue, cont.serviceQueue, cont.snatQueue,
+				cont.snatNodeInfoQueue,
 			}
 		}
 		for _, q := range qs {
