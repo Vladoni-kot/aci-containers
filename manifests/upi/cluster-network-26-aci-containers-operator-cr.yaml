@@ -1,0 +1,7 @@
+apiVersion: aci.ctrl/v1alpha1
+kind: AciContainersOperator
+metadata:
+ name: acicnioperator
+ namespace: aci-containers-system
+spec:
+ config: ""
